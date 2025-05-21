@@ -11,9 +11,13 @@ from sklearn.preprocessing import StandardScaler
 from nnmnkwii.preprocessing.f0 import interp1d
 from utils import extract_speaker_and_sentence_id
 from scipy.interpolate import UnivariateSpline
+import logging
 
 # 音素埋め込み用の辞書（例）
-PHONEME_LIST = ["a", "i", "u", "e", "o", "k", "s", "t", "n", "h", "m", "y", "r", "w", "g", "z", "d", "b", "p", "N", "silB", "silE", "sp"]
+PHONEME_LIST = ["a", "a:", "i", "i:", "u", "u:", "e", "e:", "o", "o:", "k", "s",
+                "t", "n", "f", "h", "m", "y", "r", "w", "g", "j", "z", "d", "b",
+                "p", "q", "N", "ky", "gy", "sh", "ty", "ch", "ny", "hy", "my", "ry", "py",
+                "ts", "silB", "silE", "sp"]
 PHONEME_TO_ID = {p: i for i, p in enumerate(PHONEME_LIST)}
 
 class PhonemeEmbedding(nn.Module):
@@ -74,7 +78,7 @@ def interpolate_f0(f0, timeaxis, target_frame_period):
     return f0_interpolated, new_timeaxis
 
 class SpeechDataset:
-    def __init__(self, data_dir, embedding_dim=8):
+    def __init__(self, data_dir, embedding_dim=16):
         """
         コンストラクタ
         :param data_dir: データディレクトリのパス
@@ -113,7 +117,7 @@ class SpeechDataset:
         :return: 特徴量辞書
         """
         file_name = f"ATR503{speaker_id}_{sentence_id}.wav"
-        file_path = os.path.join(self.data_dir, 'audio_data', speaker_id, file_name)
+        file_path = os.path.join(self.data_dir, 'audio_data50k', speaker_id, file_name)
         
         try:
             waveform, sample_rate = sf.read(file_path)
@@ -185,6 +189,11 @@ class SpeechDataset:
             mgc = pad_to_match_length(mgc, target_length=target_length)
             bap = pad_to_match_length(bap, target_length=target_length)
             voiced_flag = pad_to_match_length(voiced_flag, target_length=target_length)
+
+            logging.info(f"log_f0 shape: {clf0.shape}")
+            logging.info(f"spectral_envelope (mgc) shape: {mgc.shape}")
+            logging.info(f"aperiodicity (bap) shape: {bap.shape}")
+            logging.info(f"voiced_flag shape: {voiced_flag.shape}")
 
             return {
                 "log_f0": clf0,
@@ -281,7 +290,7 @@ def extract_features(config):
     特徴量抽出を行う関数
     :param config: 設定ファイルの情報を含む辞書
     """
-    dataset = SpeechDataset(data_dir=config['data_dir'])
+    dataset = SpeechDataset(data_dir=config['data_dir'], embedding_dim=16)
     
     # 出力ディレクトリの設定
     output_dirs = {

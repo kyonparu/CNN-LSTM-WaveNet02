@@ -92,7 +92,7 @@ class WaveNet(nn.Module):
 
 
 class CNN_LSTM_WaveNet(nn.Module):
-    def __init__(self, in_channels, cnn_channels, lstm_hidden, output_dim, wavenet_channels, embed_dim=None, num_layers=2, dropout=0.3):
+    def __init__(self, in_channels, cnn_channels, lstm_hidden, output_dim, wavenet_channels, embed_dim=16, num_layers=2, dropout=0.3):
         super().__init__()
         self.cnn = nn.Sequential(
             nn.Conv2d(in_channels, cnn_channels, kernel_size=(3, 3), padding=(1, 1)),
@@ -103,7 +103,8 @@ class CNN_LSTM_WaveNet(nn.Module):
             nn.ReLU()
         )
 
-        self.lstm_input_size = cnn_channels + (embed_dim or 0)
+        # embed_dimを16に設定
+        self.lstm_input_size = cnn_channels + embed_dim
         self.lstm = nn.LSTM(self.lstm_input_size, lstm_hidden, num_layers=num_layers, 
                             batch_first=True, bidirectional=True, dropout=dropout)
 

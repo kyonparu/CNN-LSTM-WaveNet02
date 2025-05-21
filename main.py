@@ -99,7 +99,7 @@ def main(args):
                 lstm_hidden=128,
                 output_dim=audio_dim,
                 wavenet_channels=128,
-                embed_dim=linguistic_dim  # 言語特徴量の次元数を渡す
+                embed_dim=16  # 言語特徴量の次元数を16に設定
             ).to(device)
             logging.info("Model initialized.")
 
@@ -151,10 +151,12 @@ def main(args):
                 lstm_hidden=128,
                 output_dim=audio_dim,
                 wavenet_channels=128,
-                embed_dim=linguistic_dim  # 言語特徴量の次元数を渡す
+                embed_dim=16  # 言語特徴量の次元数を16に設定
             ).to(device)
             checkpoint_path = config['checkpoint']
-            model.load_state_dict(torch.load(checkpoint_path)['model_state_dict'])
+            checkpoint = torch.load(checkpoint_path, map_location=device)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            logging.info(f"Checkpoint loaded from {checkpoint_path}")
             logging.info(f"Checkpoint loaded from {checkpoint_path}")
             model.eval()
             logging.info("Model loaded for evaluation.")

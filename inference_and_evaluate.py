@@ -9,6 +9,7 @@ import os
 import yaml
 from utils import extract_speaker_and_sentence_id  # 追加
 import logging
+import matplotlib.pyplot as plt
 
 # ログの設定
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -23,7 +24,7 @@ def load_model(checkpoint_path, device):
         lstm_hidden=128,
         output_dim=261,  # チェックポイントと一致させる
         wavenet_channels=128,
-        embed_dim=8  # チェックポイントと一致させる
+        embed_dim=16  # チェックポイントと一致させる
     ).to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint['model_state_dict'])
@@ -136,6 +137,58 @@ def calculate_ffe(target_f0, generated_f0):
     """Calculate F0 Frame Error (FFE)"""
     return np.sum((target_f0 == 0) != (generated_f0 == 0)) / len(target_f0)
 
+def plot_mel_spectrogram(target_spectrogram, predicted_spectrogram, save_path, speaker_id, sentence_id):
+    """
+    メルスペクトログラムをプロットして保存する関数
+    :param target_spectrogram: ターゲットのスペクトログラム
+    :param predicted_spectrogram: 推定されたスペクトログラム
+    :param save_path: 保存先のパス
+    :param speaker_id: スピーカーID
+    :param sentence_id: 発話ID
+    """
+    plt.figure(figsize=(12, 6))
+
+    # ターゲットのスペクトログラム
+    plt.subplot(1, 2, 1)
+    plt.imshow(target_spectrogram, aspect='auto', origin='lower', interpolation='none')
+    plt.colorbar()
+    plt.title(f"Target Spectrogram\nSpeaker: {speaker_id}, Sentence: {sentence_id}")
+    plt.xlabel("Time")
+    plt.ylabel("Frequency")
+
+    # 推定されたスペクトログラム
+    plt.subplot(1, 2, 2)
+    plt.imshow(predicted_spectrogram, aspect='auto', origin='lower', interpolation='none')
+    plt.colorbar()
+    plt.title(f"Predicted Spectrogram\nSpeaker: {speaker_id}, Sentence: {sentence_id}")
+    plt.xlabel("Time")
+    plt.ylabel("Frequency")
+
+    # 保存
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+    logging.info(f"Spectrogram plot saved to {save_path}")
+
+def plot_mel_cepstrum(mel_cepstrum, save_path, speaker_id, sentence_id):
+    """
+    メルケプストラムをプロットして保存する関数
+    :param mel_cepstrum: メルケプストラム（2次元配列）
+    :param save_path: 保存先のパス
+    :param speaker_id: スピーカーID
+    :param sentence_id: 発話ID
+    """
+    plt.figure(figsize=(10, 6))
+    plt.imshow(mel_cepstrum.T, aspect='auto', origin='lower', interpolation='none', cmap='viridis')
+    plt.colorbar(label="Amplitude")
+    plt.title(f"Mel-Cepstrum\nSpeaker: {speaker_id}, Sentence: {sentence_id}")
+    plt.xlabel("Time")
+    plt.ylabel("Mel-Cepstrum Coefficients")
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+    logging.info(f"Mel-Cepstrum plot saved to {save_path}")
+
 def evaluate_generated_audio(config):
     logging.info("Starting evaluation process...")
     
@@ -157,6 +210,10 @@ def evaluate_generated_audio(config):
     # inference_outputディレクトリを作成
     inference_output_dir = config.get('inference_output_dir', 'inference_output')
     os.makedirs(inference_output_dir, exist_ok=True)
+
+    # メルケプストラムの保存先ディレクトリ
+    mel_cepstrum_dir = os.path.join(inference_output_dir, "mel_cepstrum")
+    os.makedirs(mel_cepstrum_dir, exist_ok=True)
 
     # 評価指標の初期化
     mcd_scores = []
@@ -188,8 +245,18 @@ def evaluate_generated_audio(config):
 
         # 推論結果を生成
         logging.info(f"Generating audio for speaker {speaker_id}, sentence {sentence_id}...")
-        generated_waveform, f0, spectral_envelope, aperiodicity = generate_audio(model, dataset, speaker_id, sentence_id, device)
+        generated_waveform, f0, mgc, aperiodicity = generate_audio(model, dataset, speaker_id, sentence_id, device)
         logging.info("Audio generation completed.")
+
+        # メルケプストラムを保存
+        mel_cepstrum_path = os.path.join(mel_cepstrum_dir, f"{speaker_id}_{sentence_id}_mel_cepstrum.npy")
+        np.save(mel_cepstrum_path, mgc)
+        logging.info(f"Mel-Cepstrum saved: {mel_cepstrum_path}")
+
+        # メルケプストラムをプロットして保存
+        mel_cepstrum_plot_path = os.path.join(mel_cepstrum_dir, f"{speaker_id}_{sentence_id}_mel_cepstrum_plot.png")
+        plot_mel_cepstrum(mgc, mel_cepstrum_plot_path, speaker_id, sentence_id)
+        logging.info(f"Mel-Cepstrum plot saved: {mel_cepstrum_plot_path}")
 
         # デバッグログ
         logging.info(f"Target waveform length: {len(target_waveform)}")
@@ -233,7 +300,7 @@ def evaluate_generated_audio(config):
 
         # 必要な情報を保存
         output_path = os.path.join(inference_output_dir, f"{speaker_id}_{sentence_id}.npz")
-        np.savez(output_path, f0=f0, spectral_envelope=spectral_envelope, aperiodicity=aperiodicity)
+        np.savez(output_path, f0=f0, mgc=mgc, aperiodicity=aperiodicity)
         logging.info(f"Saved synthesis data for {speaker_id}_{sentence_id} to {output_path}")
 
     # 評価結果をログに出力（要約情報）
@@ -247,10 +314,10 @@ def evaluate_generated_audio(config):
     np.mean(ffe_scores), min(ffe_scores), max(ffe_scores)))
 
     # 評価結果をログに出力（詳細情報）
-    logging.debug(f"MCD scores (detailed): {mcd_scores}")
-    logging.debug(f"GPE scores (detailed): {gpe_scores}")
-    logging.debug(f"VDE scores (detailed): {vde_scores}")
-    logging.debug(f"FFE scores (detailed): {ffe_scores}")
+    #logging.debug(f"MCD scores (detailed): {mcd_scores}")
+    #logging.debug(f"GPE scores (detailed): {gpe_scores}")
+    #logging.debug(f"VDE scores (detailed): {vde_scores}")
+    #logging.debug(f"FFE scores (detailed): {ffe_scores}")
 
     # 評価結果を返す
     logging.info("Evaluation process completed.")
@@ -268,8 +335,8 @@ if __name__ == "__main__":
     metrics = tuple([float(score) for score in metric_list] for metric_list in metrics)
 
     # ログに出力
-    logging.info(f"MCD scores: [{', '.join([f'{score:.4f}' for score in metrics[0]])}]")
-    logging.info(f"GPE scores: [{', '.join([f'{score:.4f}' for score in metrics[1]])}]")
-    logging.info(f"VDE scores: [{', '.join([f'{score:.4f}' for score in metrics[2]])}]")
-    logging.info(f"FFE scores: [{', '.join([f'{score:.4f}' for score in metrics[3]])}]")
-    logging.info("Evaluation script completed.")
+    #logging.info(f"MCD scores: [{', '.join([f'{score:.4f}' for score in metrics[0]])}]")
+    #logging.info(f"GPE scores: [{', '.join([f'{score:.4f}' for score in metrics[1]])}]")
+    #logging.info(f"VDE scores: [{', '.join([f'{score:.4f}' for score in metrics[2]])}]")
+    #logging.info(f"FFE scores: [{', '.join([f'{score:.4f}' for score in metrics[3]])}]")
+    #logging.info("Evaluation script completed.")
